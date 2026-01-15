@@ -550,6 +550,9 @@ INSERT INTO test_replica_identity_fail VALUES(3, 'aaaaaa');
 SELECT * FROM test_replica_identity_fail;
 \d+ test_replica_identity_fail
 
+CREATE TABLE test_set_access_method_fail (i int PRIMARY KEY, t text) USING orioledb;
+ALTER TABLE test_set_access_method_fail SET ACCESS METHOD heap;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
 RESET search_path;

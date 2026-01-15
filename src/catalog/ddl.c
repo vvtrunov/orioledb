@@ -969,6 +969,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_SetStorage:
 						case AT_ReplicaIdentity:
 							break;
+						case AT_SetAccessMethod:
+							ereport(ERROR,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("changing access method is not supported for OrioleDB tables")));
+							break;
 						default:
 							ereport(ERROR,
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

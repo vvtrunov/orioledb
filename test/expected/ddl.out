@@ -1516,8 +1516,11 @@ SELECT * FROM test_replica_identity_fail;
 Indexes:
     "test_replica_identity_fail_pkey" PRIMARY KEY, btree (i)
 
+CREATE TABLE test_set_access_method_fail (i int PRIMARY KEY, t text) USING orioledb;
+ALTER TABLE test_set_access_method_fail SET ACCESS METHOD heap;
+ERROR:  changing access method is not supported for OrioleDB tables
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 24 other objects
+NOTICE:  drop cascades to 25 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -1542,6 +1545,7 @@ drop cascades to table o_test_plpgsql_default
 drop cascades to table test_35_columns
 drop cascades to table test_replica_identity_set
 drop cascades to table test_replica_identity_fail
+drop cascades to table test_set_access_method_fail
 DROP SCHEMA ddl CASCADE;
 NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)
