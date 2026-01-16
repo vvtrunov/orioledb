@@ -296,7 +296,8 @@ is_alter_table_partition(PlannedStmt *pstmt)
 		AlterTableCmd *cmd = linitial(top_atstmt->cmds);
 
 		if (cmd->subtype == AT_AttachPartition ||
-			cmd->subtype == AT_DetachPartition)
+			cmd->subtype == AT_DetachPartition ||
+			cmd->subtype == AT_DetachPartitionFinalize)
 			return true;
 	}
 	return false;
@@ -977,10 +978,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_AddOf:
 						case AT_AlterColumnGenericOptions:
 						case AT_AlterConstraint:
-						case AT_AttachPartition:
 						case AT_CheckNotNull:
-						case AT_DetachPartition:
-						case AT_DetachPartitionFinalize:
 						case AT_DisableTrig:
 						case AT_DisableTrigAll:
 						case AT_DisableTrigUser:
