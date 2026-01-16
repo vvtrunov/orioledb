@@ -924,7 +924,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		relid = AlterTableLookupRelation(atstmt, lockmode);
 
 		if (OidIsValid(relid) && objtype == OBJECT_TABLE &&
-			lockmode == AccessExclusiveLock)
+			(lockmode == AccessExclusiveLock || lockmode == ShareUpdateExclusiveLock))
 		{
 			Relation	rel = table_open(relid, lockmode);
 
@@ -968,6 +968,51 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_SetTableSpace:
 						case AT_SetStorage:
 						case AT_ReplicaIdentity:
+						/*
+						FIXME:
+						New subcommands
+						*/
+						case AT_AddColumnToView:
+						case AT_AddIndexConstraint:
+						case AT_AddOf:
+						case AT_AlterColumnGenericOptions:
+						case AT_AlterConstraint:
+						case AT_AttachPartition:
+						case AT_CheckNotNull:
+						case AT_DetachPartition:
+						case AT_DetachPartitionFinalize:
+						case AT_DisableTrig:
+						case AT_DisableTrigAll:
+						case AT_DisableTrigUser:
+						case AT_DropOf:
+						case AT_DropOids:
+						case AT_EnableAlwaysTrig:
+						case AT_EnableReplicaTrig:
+						case AT_EnableTrig:
+						case AT_EnableTrigAll:
+						case AT_EnableTrigUser:
+						case AT_ForceRowSecurity:
+						case AT_NoForceRowSecurity:
+						case AT_ReAddComment:
+						case AT_ReAddConstraint:
+						case AT_ReAddDomainConstraint:
+						case AT_ReAddIndex:
+						case AT_ReAddStatistics:
+						case AT_ReplaceRelOptions:
+						case AT_ResetOptions:
+						case AT_SetCompression:
+						case AT_SetExpression:
+						case AT_SetLogged:
+						case AT_SetOptions:
+						case AT_SetStatistics:
+						case AT_SetUnLogged:
+						case AT_ValidateConstraint:
+							break;
+						case AT_ClusterOn:
+						case AT_DropCluster:
+							ereport(WARNING,
+									(errmsg("alter table subcommand \"%s\" has no performance effect on OrioleDB tables with primary key",
+											alter_table_type_to_string(cmd->subtype))));
 							break;
 						case AT_SetAccessMethod:
 							ereport(ERROR,

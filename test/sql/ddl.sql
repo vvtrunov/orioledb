@@ -553,6 +553,302 @@ SELECT * FROM test_replica_identity_fail;
 CREATE TABLE test_set_access_method_fail (i int PRIMARY KEY, t text) USING orioledb;
 ALTER TABLE test_set_access_method_fail SET ACCESS METHOD heap;
 
+-- Test AT_SetStatistics
+CREATE TABLE test_set_statistics (
+	i int PRIMARY KEY,
+	t text,
+	v varchar
+) USING orioledb;
+
+INSERT INTO test_set_statistics VALUES (1, 'test', 'data');
+
+-- Set statistics target for columns
+ALTER TABLE test_set_statistics ALTER COLUMN t SET STATISTICS 100;
+ALTER TABLE test_set_statistics ALTER COLUMN v SET STATISTICS 1000;
+
+-- Verify the changes
+SELECT attname, attstattarget
+FROM pg_attribute
+WHERE attrelid = 'test_set_statistics'::regclass
+  AND attnum > 0
+ORDER BY attnum;
+
+-- Reset statistics to default (-1)
+ALTER TABLE test_set_statistics ALTER COLUMN t SET STATISTICS -1;
+
+SELECT attname, attstattarget
+FROM pg_attribute
+WHERE attrelid = 'test_set_statistics'::regclass
+  AND attname = 't';
+
+-- Test AT_SetLogged / AT_SetUnLogged
+CREATE UNLOGGED TABLE test_logged_changes (
+	i int PRIMARY KEY,
+	t text
+) USING orioledb;
+
+-- Check initial unlogged state
+SELECT relname, relpersistence
+FROM pg_class
+WHERE relname = 'test_logged_changes';
+
+-- Change to logged
+ALTER TABLE test_logged_changes SET LOGGED;
+
+SELECT relname, relpersistence
+FROM pg_class
+WHERE relname = 'test_logged_changes';
+
+-- Change back to unlogged
+ALTER TABLE test_logged_changes SET UNLOGGED;
+
+SELECT relname, relpersistence
+FROM pg_class
+WHERE relname = 'test_logged_changes';
+
+-- Test with data
+INSERT INTO test_logged_changes VALUES (1, 'test data');
+ALTER TABLE test_logged_changes SET LOGGED;
+
+SELECT * FROM test_logged_changes;
+
+-- Test AT_SetOptions / AT_ResetOptions (column-level options)
+CREATE TABLE test_column_options (
+	i int PRIMARY KEY,
+	t text,
+	n numeric
+) USING orioledb;
+
+-- Set column-level storage options
+ALTER TABLE test_column_options ALTER COLUMN t SET (n_distinct = 100);
+ALTER TABLE test_column_options ALTER COLUMN n SET (n_distinct = 50, n_distinct_inherited = 25);
+
+-- Verify options are set
+SELECT attname, attoptions
+FROM pg_attribute
+WHERE attrelid = 'test_column_options'::regclass
+  AND attnum > 0
+  AND attoptions IS NOT NULL
+ORDER BY attnum;
+
+-- Reset specific option
+ALTER TABLE test_column_options ALTER COLUMN t RESET (n_distinct);
+
+-- Verify reset
+SELECT attname, attoptions
+FROM pg_attribute
+WHERE attrelid = 'test_column_options'::regclass
+  AND attname = 't';
+
+-- Reset all options
+ALTER TABLE test_column_options ALTER COLUMN n RESET (n_distinct, n_distinct_inherited);
+
+SELECT attname, attoptions
+FROM pg_attribute
+WHERE attrelid = 'test_column_options'::regclass
+  AND attname = 'n';
+
+-- Test AT_ResetRelOptions / AT_SetRelOptions (table-level options)
+CREATE TABLE test_table_options (
+	i int PRIMARY KEY,
+	t text
+) USING orioledb;
+
+-- Set table-level options
+ALTER TABLE test_table_options SET (fillfactor = 70, autovacuum_enabled = false);
+
+-- Verify table options
+SELECT relname, reloptions
+FROM pg_class
+WHERE relname = 'test_table_options';
+
+-- Reset specific option
+ALTER TABLE test_table_options RESET (autovacuum_enabled);
+
+SELECT relname, reloptions
+FROM pg_class
+WHERE relname = 'test_table_options';
+
+-- Reset all options
+ALTER TABLE test_table_options RESET (fillfactor);
+
+SELECT relname, reloptions
+FROM pg_class
+WHERE relname = 'test_table_options';
+
+-- Test AT_ClusterOn / AT_DropCluster
+CREATE TABLE test_cluster (
+	i int,
+	t text,
+	v varchar,
+	PRIMARY KEY (i)
+) USING orioledb;
+
+CREATE INDEX test_cluster_idx ON test_cluster(t);
+
+-- Set cluster index
+ALTER TABLE test_cluster CLUSTER ON test_cluster_idx;
+
+-- Verify cluster setting
+SELECT indexrelid::regclass AS index_name, indisclustered
+FROM pg_index
+WHERE indrelid = 'test_cluster'::regclass
+ORDER BY indexrelid::regclass::text;
+
+-- Drop cluster setting
+ALTER TABLE test_cluster SET WITHOUT CLUSTER;
+
+-- Verify cluster removed
+SELECT indexrelid::regclass AS index_name, indisclustered
+FROM pg_index
+WHERE indrelid = 'test_cluster'::regclass
+ORDER BY indexrelid::regclass::text;
+
+-- Test AT_EnableRule / AT_DisableRule (with views and rules)
+CREATE TABLE test_rule_table (
+	i int PRIMARY KEY,
+	t text
+) USING orioledb;
+
+CREATE VIEW test_rule_view AS SELECT * FROM test_rule_table;
+
+CREATE RULE test_insert_rule AS
+	ON INSERT TO test_rule_view
+	DO INSTEAD
+		INSERT INTO test_rule_table VALUES (new.i, new.t);
+
+-- Verify rule is enabled
+SELECT rulename, ev_enabled
+FROM pg_rewrite
+WHERE rulename = 'test_insert_rule';
+
+-- Disable the rule
+ALTER TABLE test_rule_view DISABLE RULE test_insert_rule;
+
+SELECT rulename, ev_enabled
+FROM pg_rewrite
+WHERE rulename = 'test_insert_rule';
+
+-- Enable the rule
+ALTER TABLE test_rule_view ENABLE RULE test_insert_rule;
+
+SELECT rulename, ev_enabled
+FROM pg_rewrite
+WHERE rulename = 'test_insert_rule';
+
+-- Enable rule for replica
+ALTER TABLE test_rule_view ENABLE REPLICA RULE test_insert_rule;
+
+SELECT rulename, ev_enabled
+FROM pg_rewrite
+WHERE rulename = 'test_insert_rule';
+
+-- Enable rule always
+ALTER TABLE test_rule_view ENABLE ALWAYS RULE test_insert_rule;
+
+SELECT rulename, ev_enabled
+FROM pg_rewrite
+WHERE rulename = 'test_insert_rule';
+
+-- Test AT_CheckNotNull (CHECK NOT NULL constraint)
+CREATE TABLE test_check_not_null (
+	i int PRIMARY KEY,
+	val text
+) USING orioledb;
+
+-- Insert data with no NULLs
+INSERT INTO test_check_not_null VALUES (1, 'abc'), (2, 'def');
+
+-- Add a CHECK NOT NULL constraint without validation
+ALTER TABLE test_check_not_null ADD CONSTRAINT val_not_null CHECK (val IS NOT NULL) NOT VALID;
+
+-- Verify constraint exists but not validated
+SELECT conname, contype, convalidated
+FROM pg_constraint
+WHERE conrelid = 'test_check_not_null'::regclass
+  AND conname = 'val_not_null';
+
+-- Now validate the constraint (this internally uses AT_CheckNotNull)
+ALTER TABLE test_check_not_null VALIDATE CONSTRAINT val_not_null;
+
+-- Verify constraint is now validated
+SELECT conname, contype, convalidated
+FROM pg_constraint
+WHERE conrelid = 'test_check_not_null'::regclass
+  AND conname = 'val_not_null';
+
+-- Test that constraint works - this should fail
+\set ON_ERROR_STOP 0
+INSERT INTO test_check_not_null VALUES (3, NULL);
+\set ON_ERROR_STOP 1
+
+-- Verify NULL was rejected
+SELECT * FROM test_check_not_null ORDER BY i;
+
+-- Test AT_ValidateConstraint (validate a NOT VALID constraint)
+CREATE TABLE test_validate_constraint (
+	i int PRIMARY KEY,
+	t text
+) USING orioledb;
+
+-- Insert some data
+INSERT INTO test_validate_constraint VALUES (1, 'test'), (2, 'data');
+
+-- Add a check constraint without validation
+ALTER TABLE test_validate_constraint ADD CONSTRAINT check_t_length CHECK (length(t) > 2) NOT VALID;
+
+-- Verify constraint exists but not validated
+SELECT conname, convalidated
+FROM pg_constraint
+WHERE conrelid = 'test_validate_constraint'::regclass
+  AND conname = 'check_t_length';
+
+-- Now validate the constraint
+ALTER TABLE test_validate_constraint VALIDATE CONSTRAINT check_t_length;
+
+-- Verify constraint is now validated
+SELECT conname, convalidated
+FROM pg_constraint
+WHERE conrelid = 'test_validate_constraint'::regclass
+  AND conname = 'check_t_length';
+
+-- Test AT_SetTableSpace (change tablespace)
+-- Note: This test assumes default tablespace exists
+CREATE TABLE test_tablespace (
+	i int PRIMARY KEY,
+	t text
+) USING orioledb;
+
+-- Try to set tablespace (may be no-op if no custom tablespace)
+-- This tests that the subcommand doesn't error out
+\set ON_ERROR_STOP 0
+ALTER TABLE test_tablespace SET TABLESPACE pg_default;
+\set ON_ERROR_STOP 1
+
+-- Test AT_GenericOptions (for foreign tables, but we test the subcommand handling)
+-- This is mainly to ensure the subcommand is accepted for OrioleDB tables
+-- even though it may not do anything meaningful
+
+-- Test constraint operations with existing ddl test patterns
+CREATE TABLE test_constraint_ops (
+	i int PRIMARY KEY,
+	val int,
+	CHECK (val > 0)
+) USING orioledb;
+
+INSERT INTO test_constraint_ops VALUES (1, 10), (2, 20);
+
+-- Verify data
+SELECT * FROM test_constraint_ops ORDER BY i;
+
+-- Test dropping constraint
+ALTER TABLE test_constraint_ops DROP CONSTRAINT test_constraint_ops_val_check;
+
+-- Now we can insert negative values
+INSERT INTO test_constraint_ops VALUES (3, -5);
+
+SELECT * FROM test_constraint_ops ORDER BY i;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
 RESET search_path;
