@@ -704,51 +704,64 @@ FROM pg_index
 WHERE indrelid = 'test_cluster'::regclass
 ORDER BY indexrelid::regclass::text;
 
--- Test AT_EnableRule / AT_DisableRule (with views and rules)
+-- Test AT_EnableRule / AT_DisableRule (on tables)
+-- ENABLE/DISABLE RULE commands only work on tables, not views
 CREATE TABLE test_rule_table (
 	i int PRIMARY KEY,
 	t text
 ) USING orioledb;
 
-CREATE VIEW test_rule_view AS SELECT * FROM test_rule_table;
-
+-- Create a rule on the table that filters certain inserts
 CREATE RULE test_insert_rule AS
-	ON INSERT TO test_rule_view
-	DO INSTEAD
-		INSERT INTO test_rule_table VALUES (new.i, new.t);
+	ON INSERT TO test_rule_table
+	WHERE t = 'skip'
+	DO INSTEAD NOTHING;
 
--- Verify rule is enabled
+-- Verify rule is enabled (ev_enabled = 'O' means origin)
 SELECT rulename, ev_enabled
 FROM pg_rewrite
 WHERE rulename = 'test_insert_rule';
+
+-- Test that rule works: insert with 'skip' should be ignored
+INSERT INTO test_rule_table VALUES (1, 'skip');
+INSERT INTO test_rule_table VALUES (2, 'normal');
+SELECT * FROM test_rule_table ORDER BY i;
 
 -- Disable the rule
-ALTER TABLE test_rule_view DISABLE RULE test_insert_rule;
+ALTER TABLE test_rule_table DISABLE RULE test_insert_rule;
+
+-- Verify rule is disabled (ev_enabled = 'D')
+SELECT rulename, ev_enabled
+FROM pg_rewrite
+WHERE rulename = 'test_insert_rule';
+
+-- Now the 'skip' insert should work since rule is disabled
+INSERT INTO test_rule_table VALUES (1, 'skip');
+SELECT * FROM test_rule_table ORDER BY i;
+
+-- Enable the rule back (origin mode)
+ALTER TABLE test_rule_table ENABLE RULE test_insert_rule;
 
 SELECT rulename, ev_enabled
 FROM pg_rewrite
 WHERE rulename = 'test_insert_rule';
 
--- Enable the rule
-ALTER TABLE test_rule_view ENABLE RULE test_insert_rule;
+-- Enable rule for replica (ev_enabled = 'R')
+ALTER TABLE test_rule_table ENABLE REPLICA RULE test_insert_rule;
 
 SELECT rulename, ev_enabled
 FROM pg_rewrite
 WHERE rulename = 'test_insert_rule';
 
--- Enable rule for replica
-ALTER TABLE test_rule_view ENABLE REPLICA RULE test_insert_rule;
+-- Enable rule always (ev_enabled = 'A')
+ALTER TABLE test_rule_table ENABLE ALWAYS RULE test_insert_rule;
 
 SELECT rulename, ev_enabled
 FROM pg_rewrite
 WHERE rulename = 'test_insert_rule';
 
--- Enable rule always
-ALTER TABLE test_rule_view ENABLE ALWAYS RULE test_insert_rule;
-
-SELECT rulename, ev_enabled
-FROM pg_rewrite
-WHERE rulename = 'test_insert_rule';
+-- Cleanup
+DROP TABLE test_rule_table CASCADE;
 
 -- Test AT_CheckNotNull (internally generated for partitioned tables)
 -- AT_CheckNotNull is generated when you use ALTER TABLE ONLY ... SET NOT NULL
@@ -798,9 +811,7 @@ WHERE c.relname = 'test_check_not_null'
   AND c.relnamespace = 'ddl'::regnamespace;
 
 -- Test that NOT NULL is enforced
-\set ON_ERROR_STOP 0
 INSERT INTO test_check_not_null VALUES (75, NULL);
-\set ON_ERROR_STOP 1
 
 -- Verify data is still correct
 SELECT * FROM test_check_not_null ORDER BY i;
@@ -815,9 +826,7 @@ CREATE TABLE test_check_not_null_fail_p1 PARTITION OF test_check_not_null_fail
 	FOR VALUES FROM (1) TO (100) USING orioledb;
 
 -- Try to set NOT NULL on parent ONLY (should fail because partition doesn't have NOT NULL)
-\set ON_ERROR_STOP 0
 ALTER TABLE ONLY test_check_not_null_fail ALTER COLUMN val SET NOT NULL;
-\set ON_ERROR_STOP 1
 
 -- Test AT_ValidateConstraint (validate a NOT VALID constraint)
 CREATE TABLE test_validate_constraint (
@@ -855,9 +864,7 @@ CREATE TABLE test_tablespace (
 
 -- Try to set tablespace (may be no-op if no custom tablespace)
 -- This tests that the subcommand doesn't error out
-\set ON_ERROR_STOP 0
 ALTER TABLE test_tablespace SET TABLESPACE pg_default;
-\set ON_ERROR_STOP 1
 
 -- Test AT_GenericOptions (for foreign tables, but we test the subcommand handling)
 -- This is mainly to ensure the subcommand is accepted for OrioleDB tables
