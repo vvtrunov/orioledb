@@ -750,40 +750,74 @@ SELECT rulename, ev_enabled
 FROM pg_rewrite
 WHERE rulename = 'test_insert_rule';
 
--- Test AT_CheckNotNull (CHECK NOT NULL constraint)
+-- Test AT_CheckNotNull (internally generated for partitioned tables)
+-- AT_CheckNotNull is generated when you use ALTER TABLE ONLY ... SET NOT NULL
+-- on a partitioned table. It checks that child partitions already have NOT NULL.
+
+-- Create a partitioned table
 CREATE TABLE test_check_not_null (
-	i int PRIMARY KEY,
-	val text
-) USING orioledb;
+	i int,
+	val text NOT NULL
+) PARTITION BY RANGE (i) USING orioledb;
 
--- Insert data with no NULLs
-INSERT INTO test_check_not_null VALUES (1, 'abc'), (2, 'def');
+-- Create partitions with NOT NULL already set
+CREATE TABLE test_check_not_null_p1 PARTITION OF test_check_not_null
+	FOR VALUES FROM (1) TO (100) USING orioledb;
 
--- Add a CHECK NOT NULL constraint without validation
-ALTER TABLE test_check_not_null ADD CONSTRAINT val_not_null CHECK (val IS NOT NULL) NOT VALID;
+CREATE TABLE test_check_not_null_p2 PARTITION OF test_check_not_null
+	FOR VALUES FROM (100) TO (200) USING orioledb;
 
--- Verify constraint exists but not validated
-SELECT conname, contype, convalidated
-FROM pg_constraint
-WHERE conrelid = 'test_check_not_null'::regclass
-  AND conname = 'val_not_null';
+-- Insert test data
+INSERT INTO test_check_not_null VALUES (1, 'abc'), (50, 'def'), (150, 'ghi');
 
--- Now validate the constraint (this internally uses AT_CheckNotNull)
-ALTER TABLE test_check_not_null VALIDATE CONSTRAINT val_not_null;
+-- Verify partitions exist
+SELECT tablename FROM pg_tables
+WHERE schemaname = 'ddl' AND tablename LIKE 'test_check_not_null%'
+ORDER BY tablename;
 
--- Verify constraint is now validated
-SELECT conname, contype, convalidated
-FROM pg_constraint
-WHERE conrelid = 'test_check_not_null'::regclass
-  AND conname = 'val_not_null';
+-- Verify val column is already NOT NULL in all partitions
+SELECT c.relname, a.attname, a.attnotnull
+FROM pg_class c
+JOIN pg_attribute a ON a.attrelid = c.oid
+WHERE c.relname LIKE 'test_check_not_null%'
+  AND a.attname = 'val'
+  AND c.relnamespace = 'ddl'::regnamespace
+ORDER BY c.relname;
 
--- Test that constraint works - this should fail
+-- Now use ALTER TABLE ONLY ... SET NOT NULL on parent
+-- This internally generates AT_CheckNotNull for each partition
+-- to verify they already have NOT NULL (which they do)
+ALTER TABLE ONLY test_check_not_null ALTER COLUMN val SET NOT NULL;
+
+-- Verify the operation succeeded
+SELECT c.relname, a.attname, a.attnotnull
+FROM pg_class c
+JOIN pg_attribute a ON a.attrelid = c.oid
+WHERE c.relname = 'test_check_not_null'
+  AND a.attname = 'val'
+  AND c.relnamespace = 'ddl'::regnamespace;
+
+-- Test that NOT NULL is enforced
 \set ON_ERROR_STOP 0
-INSERT INTO test_check_not_null VALUES (3, NULL);
+INSERT INTO test_check_not_null VALUES (75, NULL);
 \set ON_ERROR_STOP 1
 
--- Verify NULL was rejected
+-- Verify data is still correct
 SELECT * FROM test_check_not_null ORDER BY i;
+
+-- Test AT_CheckNotNull failure case: partition without NOT NULL
+CREATE TABLE test_check_not_null_fail (
+	i int,
+	val text  -- Note: no NOT NULL here!
+) PARTITION BY RANGE (i) USING orioledb;
+
+CREATE TABLE test_check_not_null_fail_p1 PARTITION OF test_check_not_null_fail
+	FOR VALUES FROM (1) TO (100) USING orioledb;
+
+-- Try to set NOT NULL on parent ONLY (should fail because partition doesn't have NOT NULL)
+\set ON_ERROR_STOP 0
+ALTER TABLE ONLY test_check_not_null_fail ALTER COLUMN val SET NOT NULL;
+\set ON_ERROR_STOP 1
 
 -- Test AT_ValidateConstraint (validate a NOT VALID constraint)
 CREATE TABLE test_validate_constraint (
