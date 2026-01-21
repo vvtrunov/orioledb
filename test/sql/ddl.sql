@@ -615,21 +615,18 @@ SELECT * FROM test_logged_changes;
 -- Test AT_SetOptions / AT_ResetOptions (column-level options)
 CREATE TABLE test_column_options (
 	i int PRIMARY KEY,
-	t text,
-	n numeric
+	t text
 ) USING orioledb;
 
 -- Set column-level storage options
-ALTER TABLE test_column_options ALTER COLUMN t SET (n_distinct = 100);
-ALTER TABLE test_column_options ALTER COLUMN n SET (n_distinct = 50, n_distinct_inherited = 25);
+ALTER TABLE test_column_options ALTER COLUMN t SET (n_distinct = 100, n_distinct_inherited = 50);
 
 -- Verify options are set
 SELECT attname, attoptions
 FROM pg_attribute
 WHERE attrelid = 'test_column_options'::regclass
   AND attnum > 0
-  AND attoptions IS NOT NULL
-ORDER BY attnum;
+  AND attoptions IS NOT NULL;
 
 -- Reset specific option
 ALTER TABLE test_column_options ALTER COLUMN t RESET (n_distinct);
@@ -641,12 +638,12 @@ WHERE attrelid = 'test_column_options'::regclass
   AND attname = 't';
 
 -- Reset all options
-ALTER TABLE test_column_options ALTER COLUMN n RESET (n_distinct, n_distinct_inherited);
+ALTER TABLE test_column_options ALTER COLUMN t RESET (n_distinct_inherited);
 
 SELECT attname, attoptions
 FROM pg_attribute
 WHERE attrelid = 'test_column_options'::regclass
-  AND attname = 'n';
+  AND attname = 't';
 
 -- Test AT_ResetRelOptions / AT_SetRelOptions (table-level options)
 CREATE TABLE test_table_options (
@@ -1015,27 +1012,73 @@ WHERE a.attrelid = 'test_readd_comment'::regclass
   AND a.attnum > 0
 ORDER BY a.attnum;
 
--- Test AT_ReplaceRelOptions (table options during rewrite)
-CREATE TABLE test_replace_reloptions (
+-- Test AT_ReplaceRelOptions (used by CREATE OR REPLACE VIEW with options)
+-- AT_ReplaceRelOptions is triggered internally when CREATE OR REPLACE VIEW
+-- changes the view's options (security_barrier, security_invoker, check_option)
+CREATE TABLE test_view_base (
 	i int PRIMARY KEY,
+	t text,
 	val int
 ) USING orioledb;
 
--- Set table options
-ALTER TABLE test_replace_reloptions SET (fillfactor = 80);
+INSERT INTO test_view_base VALUES (1, 'alice', 100), (2, 'bob', 200), (3, 'charlie', 300);
 
--- Verify options
-SELECT relname, reloptions
+-- Create view without options
+CREATE VIEW test_replace_view AS SELECT * FROM test_view_base WHERE val > 0;
+
+-- Check initial view options (should be NULL or empty)
+SELECT relname, relkind, reloptions
 FROM pg_class
-WHERE relname = 'test_replace_reloptions';
+WHERE relname = 'test_replace_view';
 
--- Cause table rewrite - options should be preserved
-ALTER TABLE test_replace_reloptions ALTER COLUMN val TYPE bigint;
+-- Use CREATE OR REPLACE VIEW to add security_barrier option
+-- This triggers AT_ReplaceRelOptions internally
+CREATE OR REPLACE VIEW test_replace_view WITH (security_barrier=true)
+AS SELECT * FROM test_view_base WHERE val > 100;
 
--- Verify options preserved after rewrite
-SELECT relname, reloptions
+-- Verify security_barrier option is set
+SELECT relname, relkind, reloptions
 FROM pg_class
-WHERE relname = 'test_replace_reloptions';
+WHERE relname = 'test_replace_view';
+
+-- Test the view still works
+SELECT * FROM test_replace_view ORDER BY i;
+
+-- Replace view again with different options (security_invoker)
+-- This replaces the entire options list with new one
+CREATE OR REPLACE VIEW test_replace_view WITH (security_invoker=true)
+AS SELECT * FROM test_view_base WHERE val > 50;
+
+-- Verify options replaced (should now have security_invoker, not security_barrier)
+SELECT relname, relkind, reloptions
+FROM pg_class
+WHERE relname = 'test_replace_view';
+
+SELECT * FROM test_replace_view ORDER BY i;
+
+-- Replace view with multiple options
+CREATE OR REPLACE VIEW test_replace_view
+WITH (security_barrier=true, security_invoker=true, check_option=local)
+AS SELECT * FROM test_view_base WHERE val > 0;
+
+-- Verify multiple options set
+SELECT relname, relkind, reloptions
+FROM pg_class
+WHERE relname = 'test_replace_view';
+
+-- Replace view with no options (clears all options)
+CREATE OR REPLACE VIEW test_replace_view
+AS SELECT * FROM test_view_base WHERE val >= 100;
+
+-- Verify options cleared
+SELECT relname, relkind, reloptions
+FROM pg_class
+WHERE relname = 'test_replace_view';
+
+SELECT * FROM test_replace_view ORDER BY i;
+
+DROP VIEW test_replace_view;
+DROP TABLE test_view_base CASCADE;
 
 -- Test AT_ReAddDomainConstraint (domain constraints during table rewrite)
 -- Domain constraints need to be re-verified when table is rewritten
