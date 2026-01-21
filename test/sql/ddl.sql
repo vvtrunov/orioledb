@@ -890,6 +890,232 @@ INSERT INTO test_constraint_ops VALUES (3, -5);
 
 SELECT * FROM test_constraint_ops ORDER BY i;
 
+-- Test ReAdd* subcommands (triggered during table rewrites)
+-- These subcommands are used internally when ALTER TABLE causes a table rewrite
+
+-- Test AT_ReAddConstraint (triggered by ALTER TYPE with constraints)
+CREATE TABLE test_readd_constraint (
+	i int PRIMARY KEY,
+	val int CHECK (val > 0)
+) USING orioledb;
+
+INSERT INTO test_readd_constraint VALUES (1, 100), (2, 200);
+
+-- Verify constraint exists
+SELECT conname, contype
+FROM pg_constraint
+WHERE conrelid = 'test_readd_constraint'::regclass
+  AND contype = 'c'
+ORDER BY conname;
+
+-- Change column type - this causes table rewrite and ReAddConstraint
+ALTER TABLE test_readd_constraint ALTER COLUMN val TYPE bigint;
+
+-- Verify constraint still exists after rewrite
+SELECT conname, contype
+FROM pg_constraint
+WHERE conrelid = 'test_readd_constraint'::regclass
+  AND contype = 'c'
+ORDER BY conname;
+
+-- Verify constraint still works
+INSERT INTO test_readd_constraint VALUES (3, -5);
+
+SELECT * FROM test_readd_constraint ORDER BY i;
+
+-- Test AT_ReAddIndex (triggered by ALTER TYPE on indexed columns)
+CREATE TABLE test_readd_index (
+	i int PRIMARY KEY,
+	code int,
+	name text
+) USING orioledb;
+
+CREATE INDEX test_readd_index_code_idx ON test_readd_index(code);
+CREATE INDEX test_readd_index_name_idx ON test_readd_index(name);
+
+INSERT INTO test_readd_index VALUES (1, 100, 'alice'), (2, 200, 'bob');
+
+-- Verify indexes exist
+SELECT indexname
+FROM pg_indexes
+WHERE tablename = 'test_readd_index'
+  AND schemaname = 'ddl'
+ORDER BY indexname;
+
+-- Change non-indexed column type - causes table rewrite, indexes are preserved
+ALTER TABLE test_readd_index ALTER COLUMN name TYPE varchar(100);
+
+-- Verify indexes still exist after rewrite
+SELECT indexname
+FROM pg_indexes
+WHERE tablename = 'test_readd_index'
+  AND schemaname = 'ddl'
+ORDER BY indexname;
+
+-- Verify indexes still work
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM test_readd_index WHERE code = 100;
+SELECT * FROM test_readd_index WHERE code = 100;
+RESET enable_seqscan;
+
+-- Test AT_ReAddStatistics (triggered by table rewrite with statistics)
+CREATE TABLE test_readd_statistics (
+	i int PRIMARY KEY,
+	val int,
+	txt text
+) USING orioledb;
+
+-- Set custom statistics targets
+ALTER TABLE test_readd_statistics ALTER COLUMN val SET STATISTICS 500;
+ALTER TABLE test_readd_statistics ALTER COLUMN txt SET STATISTICS 1000;
+
+-- Verify statistics targets are set
+SELECT attname, attstattarget
+FROM pg_attribute
+WHERE attrelid = 'test_readd_statistics'::regclass
+  AND attnum > 0
+ORDER BY attnum;
+
+-- Cause a table rewrite by changing a column type
+ALTER TABLE test_readd_statistics ALTER COLUMN i TYPE bigint;
+
+-- Verify statistics targets are preserved after rewrite
+SELECT attname, attstattarget
+FROM pg_attribute
+WHERE attrelid = 'test_readd_statistics'::regclass
+  AND attnum > 0
+ORDER BY attnum;
+
+-- Test AT_ReAddComment (triggered by table rewrite with column comments)
+CREATE TABLE test_readd_comment (
+	i int PRIMARY KEY,
+	val int
+) USING orioledb;
+
+-- Add comments to columns
+COMMENT ON COLUMN test_readd_comment.i IS 'Primary key column';
+COMMENT ON COLUMN test_readd_comment.val IS 'Value column';
+
+-- Verify comments exist
+SELECT a.attname, d.description
+FROM pg_attribute a
+LEFT JOIN pg_description d ON d.objoid = a.attrelid AND d.objsubid = a.attnum
+WHERE a.attrelid = 'test_readd_comment'::regclass
+  AND a.attnum > 0
+ORDER BY a.attnum;
+
+-- Cause table rewrite
+ALTER TABLE test_readd_comment ALTER COLUMN val TYPE bigint;
+
+-- Verify comments are preserved after rewrite
+SELECT a.attname, d.description
+FROM pg_attribute a
+LEFT JOIN pg_description d ON d.objoid = a.attrelid AND d.objsubid = a.attnum
+WHERE a.attrelid = 'test_readd_comment'::regclass
+  AND a.attnum > 0
+ORDER BY a.attnum;
+
+-- Test AT_ReplaceRelOptions (table options during rewrite)
+CREATE TABLE test_replace_reloptions (
+	i int PRIMARY KEY,
+	val int
+) USING orioledb;
+
+-- Set table options
+ALTER TABLE test_replace_reloptions SET (fillfactor = 80);
+
+-- Verify options
+SELECT relname, reloptions
+FROM pg_class
+WHERE relname = 'test_replace_reloptions';
+
+-- Cause table rewrite - options should be preserved
+ALTER TABLE test_replace_reloptions ALTER COLUMN val TYPE bigint;
+
+-- Verify options preserved after rewrite
+SELECT relname, reloptions
+FROM pg_class
+WHERE relname = 'test_replace_reloptions';
+
+-- Test AT_ReAddDomainConstraint (domain constraints during table rewrite)
+-- Domain constraints need to be re-verified when table is rewritten
+-- Create a domain with CHECK constraint
+CREATE DOMAIN positive_int AS int CHECK (VALUE > 0);
+CREATE DOMAIN email_type AS varchar(100) CHECK (VALUE ~ '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$');
+
+CREATE TABLE test_readd_domain_constraint (
+	i int PRIMARY KEY,
+	quantity positive_int,
+	contact_email email_type
+) USING orioledb;
+
+-- Insert valid data
+INSERT INTO test_readd_domain_constraint VALUES (1, 100, 'user@example.com');
+INSERT INTO test_readd_domain_constraint VALUES (2, 50, 'admin@test.org');
+
+-- Verify domain constraints work before rewrite
+INSERT INTO test_readd_domain_constraint VALUES (3, -5, 'valid@email.com');  -- Should fail: negative quantity
+INSERT INTO test_readd_domain_constraint VALUES (4, 10, 'invalid-email');    -- Should fail: invalid email format
+
+SELECT * FROM test_readd_domain_constraint ORDER BY i;
+
+-- Verify domain constraints exist in catalog
+SELECT t.typname, c.conname, c.consrc
+FROM pg_constraint c
+JOIN pg_type t ON t.oid = c.contypid
+WHERE t.typname IN ('positive_int', 'email_type')
+ORDER BY t.typname, c.conname;
+
+-- Cause table rewrite by changing a different column
+-- This should trigger AT_ReAddDomainConstraint for the domain columns
+ALTER TABLE test_readd_domain_constraint ADD COLUMN extra_data text;
+ALTER TABLE test_readd_domain_constraint ALTER COLUMN extra_data TYPE varchar(50);
+
+-- Verify domain constraints still work after rewrite
+INSERT INTO test_readd_domain_constraint (i, quantity, contact_email) VALUES (5, -10, 'test@example.com');  -- Should fail
+INSERT INTO test_readd_domain_constraint (i, quantity, contact_email) VALUES (6, 20, 'bad-email');          -- Should fail
+INSERT INTO test_readd_domain_constraint (i, quantity, contact_email) VALUES (7, 75, 'good@email.com');     -- Should succeed
+
+SELECT * FROM test_readd_domain_constraint ORDER BY i;
+
+-- Verify domain constraints still exist after rewrite
+SELECT t.typname, c.conname, c.consrc
+FROM pg_constraint c
+JOIN pg_type t ON t.oid = c.contypid
+WHERE t.typname IN ('positive_int', 'email_type')
+ORDER BY t.typname, c.conname;
+
+-- Test with domain that has NOT NULL constraint
+CREATE DOMAIN nonempty_text AS text NOT NULL CHECK (length(VALUE) > 0);
+
+CREATE TABLE test_domain_not_null (
+	i int PRIMARY KEY,
+	description nonempty_text
+) USING orioledb;
+
+INSERT INTO test_domain_not_null VALUES (1, 'Valid description');
+INSERT INTO test_domain_not_null VALUES (2, NULL);  -- Should fail: NOT NULL
+INSERT INTO test_domain_not_null VALUES (3, '');    -- Should fail: length check
+
+SELECT * FROM test_domain_not_null ORDER BY i;
+
+-- Cause rewrite
+ALTER TABLE test_domain_not_null ALTER COLUMN i TYPE bigint;
+
+-- Verify constraints still enforced after rewrite
+INSERT INTO test_domain_not_null VALUES (4, NULL);  -- Should fail
+INSERT INTO test_domain_not_null VALUES (5, '');    -- Should fail
+INSERT INTO test_domain_not_null VALUES (6, 'Another valid description');  -- Should succeed
+
+SELECT * FROM test_domain_not_null ORDER BY i;
+
+-- Cleanup domains
+DROP TABLE test_domain_not_null CASCADE;
+DROP TABLE test_readd_domain_constraint CASCADE;
+DROP DOMAIN nonempty_text;
+DROP DOMAIN email_type;
+DROP DOMAIN positive_int;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
 RESET search_path;
