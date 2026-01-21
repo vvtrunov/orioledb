@@ -573,8 +573,8 @@ WHERE attrelid = 'test_set_statistics'::regclass
   AND attnum > 0
 ORDER BY attnum;
 
--- Reset statistics to default (-1)
-ALTER TABLE test_set_statistics ALTER COLUMN t SET STATISTICS -1;
+-- Reset statistics to default
+ALTER TABLE test_set_statistics ALTER COLUMN t SET STATISTICS DEFAULT;
 
 SELECT attname, attstattarget
 FROM pg_attribute
