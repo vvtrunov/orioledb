@@ -1488,6 +1488,109 @@ DROP TABLE test_trigger_ref CASCADE;
 DROP TABLE test_trigger_log CASCADE;
 DROP FUNCTION test_trigger_func();
 
+-- Test AT_ForceRowSecurity and AT_NoForceRowSecurity
+-- Row-Level Security (RLS) allows table owners to bypass RLS policies by default
+-- FORCE ROW SECURITY makes RLS policies apply even to table owner
+
+-- Create test users for RLS testing
+CREATE ROLE rls_test_owner;
+CREATE ROLE rls_test_user;
+
+-- Grant necessary permissions
+GRANT USAGE ON SCHEMA ddl TO rls_test_owner, rls_test_user;
+GRANT CREATE ON SCHEMA ddl TO rls_test_owner;
+
+-- Create table as the owner
+SET ROLE rls_test_owner;
+
+CREATE TABLE test_rls_table (
+	i int PRIMARY KEY,
+	department text,
+	employee_name text,
+	salary numeric(10,2)
+) USING orioledb;
+
+-- Insert test data
+INSERT INTO test_rls_table VALUES
+	(1, 'HR', 'Alice', 70000),
+	(2, 'HR', 'Bob', 65000),
+	(3, 'IT', 'Charlie', 80000),
+	(4, 'IT', 'Diana', 85000),
+	(5, 'Sales', 'Eve', 60000);
+
+-- Enable row level security on the table
+ALTER TABLE test_rls_table ENABLE ROW LEVEL SECURITY;
+
+-- Check initial RLS settings (relrowsecurity should be true, relforcerowsecurity should be false)
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname = 'test_rls_table';
+
+-- Create a policy that only shows HR department records
+CREATE POLICY hr_policy ON test_rls_table
+	FOR SELECT
+	USING (department = 'HR');
+
+-- Grant select permission to test user
+GRANT SELECT ON test_rls_table TO rls_test_user;
+
+-- As owner, we can see ALL rows (owner bypasses RLS by default)
+SELECT i, department, employee_name, salary
+FROM test_rls_table
+ORDER BY i;
+
+-- Switch to regular user - should only see HR department due to policy
+SET ROLE rls_test_user;
+
+SELECT i, department, employee_name, salary
+FROM test_rls_table
+ORDER BY i;
+
+-- Switch back to owner
+SET ROLE rls_test_owner;
+
+-- Test AT_ForceRowSecurity - force RLS policies to apply even to owner
+ALTER TABLE test_rls_table FORCE ROW LEVEL SECURITY;
+
+-- Verify setting changed (relforcerowsecurity = true)
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname = 'test_rls_table';
+
+-- Now even as owner, we should only see HR department rows
+SELECT i, department, employee_name, salary
+FROM test_rls_table
+ORDER BY i;
+
+-- Verify the policy is actually being enforced for owner now
+SELECT COUNT(*) as visible_rows FROM test_rls_table;  -- Should be 2 (only HR)
+
+-- Test AT_NoForceRowSecurity - allow owner to bypass RLS again
+ALTER TABLE test_rls_table NO FORCE ROW LEVEL SECURITY;
+
+-- Verify setting changed back (relforcerowsecurity = false)
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname = 'test_rls_table';
+
+-- Owner should now see all rows again (bypassing RLS)
+SELECT i, department, employee_name, salary
+FROM test_rls_table
+ORDER BY i;
+
+SELECT COUNT(*) as visible_rows FROM test_rls_table;  -- Should be 5 (all rows)
+
+-- Regular user still affected by policy
+SET ROLE rls_test_user;
+
+SELECT COUNT(*) as visible_rows FROM test_rls_table;  -- Should be 2 (only HR)
+
+-- Cleanup
+RESET ROLE;
+DROP TABLE test_rls_table CASCADE;
+DROP ROLE rls_test_owner;
+DROP ROLE rls_test_user;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
 RESET search_path;
