@@ -968,11 +968,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_SetTableSpace:
 						case AT_SetStorage:
 						case AT_ReplicaIdentity:
-						/*
-						FIXME:
-						New subcommands
-						*/
-						case AT_AddColumnToView:
 						case AT_AddIndexConstraint:
 						case AT_AddOf:
 						case AT_AlterColumnGenericOptions:
