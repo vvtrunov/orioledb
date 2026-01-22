@@ -1591,6 +1591,117 @@ DROP TABLE test_rls_table CASCADE;
 DROP ROLE rls_test_owner;
 DROP ROLE rls_test_user;
 
+-- Test AT_AddOf and AT_DropOf (typed tables)
+-- Typed tables are tables that are bound to a composite type
+-- AT_AddOf converts a regular table to a typed table
+-- AT_DropOf converts a typed table back to a regular table
+
+-- Create a composite type for employee data
+CREATE TYPE employee_type AS (
+	emp_id int,
+	emp_name text,
+	emp_salary numeric(10,2)
+);
+
+-- Create a regular table (not typed)
+CREATE TABLE test_regular_table (
+	emp_id int PRIMARY KEY,
+	emp_name text,
+	emp_salary numeric(10,2)
+) USING orioledb;
+
+-- Check initial state (reloftype should be 0 for regular table)
+SELECT relname, reloftype, relkind
+FROM pg_class
+WHERE relname = 'test_regular_table';
+
+-- Insert test data
+INSERT INTO test_regular_table VALUES (1, 'Alice', 70000);
+INSERT INTO test_regular_table VALUES (2, 'Bob', 65000);
+
+SELECT * FROM test_regular_table ORDER BY emp_id;
+
+-- Test AT_AddOf - convert regular table to typed table
+ALTER TABLE test_regular_table OF employee_type;
+
+-- Verify table is now typed (reloftype should be OID of employee_type)
+SELECT c.relname, c.reloftype, t.typname
+FROM pg_class c
+LEFT JOIN pg_type t ON c.reloftype = t.oid
+WHERE c.relname = 'test_regular_table';
+
+-- Verify data is preserved
+SELECT * FROM test_regular_table ORDER BY emp_id;
+
+-- Typed tables still work normally for DML
+INSERT INTO test_regular_table VALUES (3, 'Charlie', 80000);
+UPDATE test_regular_table SET emp_salary = 72000 WHERE emp_id = 1;
+DELETE FROM test_regular_table WHERE emp_id = 2;
+
+SELECT * FROM test_regular_table ORDER BY emp_id;
+
+-- Test that ADD COLUMN fails on typed table (must modify type instead)
+ALTER TABLE test_regular_table ADD COLUMN emp_department text;  -- Should fail
+
+-- Test that DROP COLUMN fails on typed table
+ALTER TABLE test_regular_table DROP COLUMN emp_salary;  -- Should fail
+
+-- Test AT_DropOf - convert typed table back to regular table
+ALTER TABLE test_regular_table NOT OF;
+
+-- Verify table is no longer typed (reloftype should be 0)
+SELECT c.relname, c.reloftype
+FROM pg_class c
+WHERE c.relname = 'test_regular_table';
+
+-- Verify data is still preserved
+SELECT * FROM test_regular_table ORDER BY emp_id;
+
+-- Regular table operations still work, including ADD COLUMN
+INSERT INTO test_regular_table VALUES (4, 'Diana', 85000);
+
+-- Now that it's a regular table, ADD COLUMN should succeed
+ALTER TABLE test_regular_table ADD COLUMN emp_department text;
+
+-- Verify new column exists
+SELECT * FROM test_regular_table ORDER BY emp_id;
+
+-- Create a typed table directly using OF syntax
+CREATE TABLE test_typed_table OF employee_type (
+	PRIMARY KEY (emp_id)
+) USING orioledb;
+
+-- Verify it's typed from creation
+SELECT c.relname, c.reloftype, t.typname
+FROM pg_class c
+LEFT JOIN pg_type t ON c.reloftype = t.oid
+WHERE c.relname = 'test_typed_table';
+
+-- Insert data into typed table
+INSERT INTO test_typed_table VALUES (10, 'Eve', 60000);
+INSERT INTO test_typed_table VALUES (11, 'Frank', 62000);
+
+SELECT * FROM test_typed_table ORDER BY emp_id;
+
+-- Convert it to regular table using AT_DropOf
+ALTER TABLE test_typed_table NOT OF;
+
+-- Verify it's no longer typed
+SELECT c.relname, c.reloftype
+FROM pg_class c
+WHERE c.relname = 'test_typed_table';
+
+-- Data still accessible
+SELECT * FROM test_typed_table ORDER BY emp_id;
+
+ALTER TABLE test_typed_table ADD COLUMN emp_department text;
+SELECT * FROM test_typed_table ORDER BY emp_id;
+
+-- Cleanup
+DROP TABLE test_typed_table CASCADE;
+DROP TABLE test_regular_table CASCADE;
+DROP TYPE employee_type;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
 RESET search_path;
