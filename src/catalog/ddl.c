@@ -998,8 +998,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_ReAddStatistics:
 						case AT_ReplaceRelOptions:
 						case AT_ResetOptions:
-						case AT_SetCompression:
-						case AT_SetExpression:
 						case AT_SetLogged:
 						case AT_SetOptions:
 						case AT_SetStatistics:
@@ -1017,6 +1015,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									(errcode(ERRCODE_SYNTAX_ERROR),
 									 errmsg("changing access method is not supported for OrioleDB tables")));
 							break;
+						case AT_SetExpression:
+						case AT_SetCompression:
 						default:
 							ereport(ERROR,
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

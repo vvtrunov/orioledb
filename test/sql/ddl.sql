@@ -1159,6 +1159,92 @@ DROP DOMAIN nonempty_text;
 DROP DOMAIN email_type;
 DROP DOMAIN positive_int;
 
+-- Test AT_SetCompression (column compression method)
+-- PostgreSQL supports compression methods: pglz (default), lz4
+CREATE TABLE test_set_compression (
+	i int PRIMARY KEY,
+	data1 text
+) USING orioledb;
+
+-- Check initial compression settings (should be DEFAULT or empty)
+SELECT attname, attcompression
+FROM pg_attribute
+WHERE attrelid = 'test_set_compression'::regclass
+  AND attname = 'data1'
+ORDER BY attname;
+
+-- Set compression method for data1 column
+ALTER TABLE test_set_compression ALTER COLUMN data1 SET COMPRESSION pglz;
+
+SELECT attname, attcompression
+FROM pg_attribute
+WHERE attrelid = 'test_set_compression'::regclass
+  AND attname = 'data1'
+ORDER BY attname;
+
+DROP TABLE test_set_compression CASCADE;
+
+-- Test AT_SetExpression (ALTER TABLE ... ALTER COLUMN ... SET EXPRESSION)
+-- AT_SetExpression allows changing the generation expression for a STORED generated column
+-- This feature is available in PostgreSQL 17+
+CREATE TABLE test_set_expression (
+	i int PRIMARY KEY,
+	price numeric(10,2),
+	quantity int,
+	total numeric(10,2) GENERATED ALWAYS AS (price * quantity) STORED
+) USING orioledb;
+
+-- Insert test data
+INSERT INTO test_set_expression (i, price, quantity) VALUES (1, 10.50, 5);
+INSERT INTO test_set_expression (i, price, quantity) VALUES (2, 25.00, 3);
+INSERT INTO test_set_expression (i, price, quantity) VALUES (3, 7.99, 10);
+
+-- Verify initial generated column values (price * quantity)
+SELECT i, price, quantity, total FROM test_set_expression ORDER BY i;
+
+-- Check the initial generated column expression in catalog
+SELECT a.attname, a.attgenerated, pg_get_expr(d.adbin, d.adrelid) as generation_expr
+FROM pg_attribute a
+JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+WHERE a.attrelid = 'test_set_expression'::regclass
+  AND a.attname = 'total';
+
+-- Use AT_SetExpression to change the generation formula
+-- Change from (price * quantity) to (price * quantity * 1.1) to add 10% markup
+ALTER TABLE test_set_expression
+  ALTER COLUMN total SET EXPRESSION AS (price * quantity * 1.1);
+
+-- Verify the expression was updated in catalog
+SELECT a.attname, a.attgenerated, pg_get_expr(d.adbin, d.adrelid) as generation_expr
+FROM pg_attribute a
+JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+WHERE a.attrelid = 'test_set_expression'::regclass
+  AND a.attname = 'total';
+
+-- Verify all existing values were recalculated with new expression
+SELECT i, price, quantity, total,
+	(price * quantity * 1.1) as expected_total
+FROM test_set_expression
+ORDER BY i;
+
+UPDATE test_set_expression SET price = 15.00 WHERE i = 1;
+
+-- Verify recalculation after update
+SELECT i, price, quantity, total,
+	(price * quantity * 1.1) as expected_total
+FROM test_set_expression
+ORDER BY i;
+
+-- Insert new row to verify new expression is used for new data
+INSERT INTO test_set_expression (i, price, quantity) VALUES (4, 20.00, 2);
+
+SELECT i, price, quantity, total,
+	(price * quantity * 1.1) as expected_total
+FROM test_set_expression
+ORDER BY i;
+
+DROP TABLE test_set_expression CASCADE;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
 RESET search_path;

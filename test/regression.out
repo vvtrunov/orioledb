@@ -1,0 +1,7 @@
+# initializing database system by running initdb
+# using temp instance on port 55318 with PID 38436
+not ok 1     - ddl                                       508 ms
+1..1
+# 1 of 1 tests failed.
+# The differences that caused some tests to fail can be viewed in the file "/Users/voffk4/work/old_repos/orioledb/test/regression.diffs".
+# A copy of the test summary that you see above is saved in the file "/Users/voffk4/work/old_repos/orioledb/test/regression.out".
