@@ -1777,6 +1777,41 @@ ROLLBACK;
 DROP TABLE test_alter_constraint CASCADE;
 DROP TABLE test_alter_constraint_ref CASCADE;
 
+-- Test AT_AddIndexConstraint
+-- Tests adding constraint using existing index with USING INDEX clause
+
+CREATE TABLE test_add_index_constraint (
+	i int,
+	val text
+) USING orioledb;
+
+INSERT INTO test_add_index_constraint VALUES (1, 'one'), (2, 'two'), (3, 'three');
+
+-- Create a unique index first
+CREATE UNIQUE INDEX test_idx_i ON test_add_index_constraint(i);
+
+-- Check initial state (index exists but no constraint)
+SELECT conname, contype, conindid::regclass
+FROM pg_constraint
+WHERE conrelid = 'test_add_index_constraint'::regclass;
+
+-- Test AT_AddIndexConstraint: Add PRIMARY KEY using existing index
+ALTER TABLE test_add_index_constraint
+	ADD CONSTRAINT test_pk PRIMARY KEY USING INDEX test_idx_i;
+
+-- Verify constraint was added
+SELECT conname, contype, conindid::regclass
+FROM pg_constraint
+WHERE conrelid = 'test_add_index_constraint'::regclass;
+
+-- Test constraint enforcement
+INSERT INTO test_add_index_constraint VALUES (4, 'four');  -- Should succeed
+-- FIXME. Now it does not fail as expected
+INSERT INTO test_add_index_constraint VALUES (1, 'duplicate');  -- Should fail (PK violation)
+
+-- Cleanup
+DROP TABLE test_add_index_constraint CASCADE;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
 RESET search_path;
