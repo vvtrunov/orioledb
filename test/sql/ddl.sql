@@ -1270,6 +1270,50 @@ DROP TABLE o_test_typed_table CASCADE;
 DROP TABLE o_test_regular_table CASCADE;
 DROP TYPE employee_type;
 
+-- Test AT_AddColumnToView
+-- AT_AddColumnToView is triggered internally by CREATE OR REPLACE VIEW
+-- when the replacement view has additional columns compared to the original
+CREATE TABLE o_test_view_source (
+	i int PRIMARY KEY,
+	name text,
+	value int,
+	score int
+) USING orioledb;
+
+INSERT INTO o_test_view_source VALUES
+	(1, 'alice', 100, 85),
+	(2, 'bob', 200, 92),
+	(3, 'charlie', 300, 78);
+
+-- Create an initial view with 2 columns
+CREATE VIEW o_test_add_col_view AS SELECT i, name FROM o_test_view_source;
+
+-- Check initial view structure (2 columns)
+\d o_test_add_col_view
+SELECT * FROM o_test_add_col_view ORDER BY i;
+
+-- Test AT_AddColumnToView: Replace view with an additional column
+-- This internally triggers AT_AddColumnToView for the 'value' column
+CREATE OR REPLACE VIEW o_test_add_col_view AS
+	SELECT i, name, value FROM o_test_view_source;
+
+-- Check updated view structure (3 columns now)
+\d o_test_add_col_view
+SELECT * FROM o_test_add_col_view ORDER BY i;
+
+ALTER TABLE o_test_view_source ADD COLUMN extra_info text DEFAULT 'N/A';
+
+CREATE OR REPLACE VIEW o_test_add_col_view AS
+	SELECT i, name, value, extra_info FROM o_test_view_source;
+
+-- Check updated view structure (4 columns now)
+\d o_test_add_col_view
+SELECT * FROM o_test_add_col_view ORDER BY i;
+
+-- Cleanup views
+DROP VIEW o_test_add_col_view CASCADE;
+DROP TABLE o_test_view_source CASCADE;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
 RESET search_path;

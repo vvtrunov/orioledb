@@ -154,6 +154,7 @@ alter_table_type_to_string(AlterTableType cmdtype)
 	switch (cmdtype)
 	{
 		case AT_AddColumn:
+		case AT_AddColumnToView:
 			return "ADD COLUMN";
 		case AT_ColumnDefault:
 		case AT_CookedColumnDefault:
