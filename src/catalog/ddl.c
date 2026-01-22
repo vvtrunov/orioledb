@@ -983,7 +983,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_DisableTrigAll:
 						case AT_DisableTrigUser:
 						case AT_DropOf:
-						case AT_DropOids:
 						case AT_EnableAlwaysTrig:
 						case AT_EnableReplicaTrig:
 						case AT_EnableTrig:
@@ -1003,6 +1002,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_SetStatistics:
 						case AT_SetUnLogged:
 						case AT_ValidateConstraint:
+							break;
+						case AT_DropOids:
+							ereport(WARNING,
+									(errmsg("alter table subcommand \"%s\" has no effect on OrioleDB tables since they do not use OIDs",
+											alter_table_type_to_string(cmd->subtype))));
 							break;
 						case AT_ClusterOn:
 						case AT_DropCluster:

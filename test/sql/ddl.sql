@@ -1702,6 +1702,81 @@ DROP TABLE test_typed_table CASCADE;
 DROP TABLE test_regular_table CASCADE;
 DROP TYPE employee_type;
 
+-- Test AT_AlterConstraint
+-- Tests altering constraint attributes (DEFERRABLE, INITIALLY DEFERRED/IMMEDIATE)
+
+CREATE TABLE test_alter_constraint_ref (
+	i int PRIMARY KEY
+) USING orioledb;
+
+CREATE TABLE test_alter_constraint (
+	i int PRIMARY KEY,
+	ref_id int,
+	val text,
+	CONSTRAINT fk_test FOREIGN KEY (ref_id) REFERENCES test_alter_constraint_ref(i)
+) USING orioledb;
+
+-- Insert reference data
+INSERT INTO test_alter_constraint_ref VALUES (1), (2), (3);
+
+-- Check initial constraint properties (NOT DEFERRABLE by default)
+SELECT conname, condeferrable, condeferred
+FROM pg_constraint
+WHERE conname = 'fk_test';
+
+-- Test AT_AlterConstraint: Make constraint DEFERRABLE INITIALLY DEFERRED
+ALTER TABLE test_alter_constraint
+	ALTER CONSTRAINT fk_test DEFERRABLE INITIALLY DEFERRED;
+
+-- Verify constraint properties changed
+SELECT conname, condeferrable, condeferred
+FROM pg_constraint
+WHERE conname = 'fk_test';
+
+-- Test deferred constraint behavior
+BEGIN;
+-- This should succeed because constraint is deferred
+INSERT INTO test_alter_constraint VALUES (1, 99, 'test');
+-- Check that invalid reference exists temporarily
+SELECT * FROM test_alter_constraint WHERE ref_id = 99;
+-- This should fail on commit
+COMMIT;
+
+-- Test AT_AlterConstraint: Change to DEFERRABLE INITIALLY IMMEDIATE
+ALTER TABLE test_alter_constraint
+	ALTER CONSTRAINT fk_test DEFERRABLE INITIALLY IMMEDIATE;
+
+-- Verify constraint properties changed
+SELECT conname, condeferrable, condeferred
+FROM pg_constraint
+WHERE conname = 'fk_test';
+
+-- Even though constraint is INITIALLY IMMEDIATE, we can defer it in a transaction
+BEGIN;
+SET CONSTRAINTS fk_test DEFERRED;
+INSERT INTO test_alter_constraint VALUES (2, 88, 'test2');
+SELECT * FROM test_alter_constraint WHERE ref_id = 88;
+COMMIT;
+
+-- Test AT_AlterConstraint: Make constraint NOT DEFERRABLE
+ALTER TABLE test_alter_constraint
+	ALTER CONSTRAINT fk_test NOT DEFERRABLE;
+
+-- Verify constraint properties changed back
+SELECT conname, condeferrable, condeferred
+FROM pg_constraint
+WHERE conname = 'fk_test';
+
+-- Now constraint cannot be deferred
+BEGIN;
+-- This should fail immediately (constraint not deferrable)
+INSERT INTO test_alter_constraint VALUES (3, 77, 'test3');
+ROLLBACK;
+
+-- Cleanup
+DROP TABLE test_alter_constraint CASCADE;
+DROP TABLE test_alter_constraint_ref CASCADE;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
 RESET search_path;
