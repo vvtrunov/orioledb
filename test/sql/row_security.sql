@@ -108,6 +108,52 @@ TABLE document;
 SET SESSION AUTHORIZATION DEFAULT;
 TABLE document;
 
+-- Test AT_ForceRowSecurity and AT_NoForceRowSecurity
+-- These commands control whether table owners are subject to RLS policies
+
+SET SESSION AUTHORIZATION regress_rls_alice;
+
+-- Check current settings on document table (RLS enabled, not forced)
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname = 'document';
+
+-- As owner, alice can see all rows (bypassing RLS policies)
+SELECT COUNT(*) as owner_visible_rows FROM document;
+
+-- Test AT_ForceRowSecurity - force RLS policies to apply even to table owner
+ALTER TABLE document FORCE ROW LEVEL SECURITY;
+
+-- Verify setting changed (relforcerowsecurity = true)
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname = 'document';
+
+-- Now even as owner, alice should be subject to the policies
+SELECT COUNT(*) as owner_visible_rows_forced FROM document;
+
+-- Switch to another user to verify policy still works normally
+SET SESSION AUTHORIZATION regress_rls_bob;
+SELECT COUNT(*) as bob_visible_rows FROM document;
+
+-- Test AT_NoForceRowSecurity - allow owner to bypass RLS again
+SET SESSION AUTHORIZATION regress_rls_alice;
+ALTER TABLE document NO FORCE ROW LEVEL SECURITY;
+
+-- Verify setting changed back (relforcerowsecurity = false)
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname = 'document';
+
+-- Owner should now see all rows again (bypassing RLS)
+SELECT COUNT(*) as owner_visible_rows_normal FROM document;
+
+-- Regular users still subject to policies
+SET SESSION AUTHORIZATION regress_rls_bob;
+SELECT COUNT(*) as bob_visible_rows_still FROM document;
+
+SET SESSION AUTHORIZATION DEFAULT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA row_security_schema CASCADE;
 RESET search_path;
