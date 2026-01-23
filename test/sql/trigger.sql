@@ -318,7 +318,14 @@ ALTER TABLE test_trigger_table
 	ADD CONSTRAINT fk_test_ref FOREIGN KEY (i) REFERENCES test_trigger_ref(ref_id);
 
 -- Check triggers now (should have user triggers + internal FK triggers)
-SELECT tgname, tgenabled, tgisinternal
+SELECT
+	CASE
+		WHEN tgname ~ '^RI_ConstraintTrigger_c_[0-9]+$'
+		THEN 'RI_ConstraintTrigger'
+		ELSE tgname
+	END AS tgname,
+	tgenabled,
+	tgisinternal
 FROM pg_trigger
 WHERE tgrelid = 'test_trigger_table'::regclass
 ORDER BY tgisinternal, tgname;
@@ -327,7 +334,14 @@ ORDER BY tgisinternal, tgname;
 ALTER TABLE test_trigger_table DISABLE TRIGGER USER;
 
 -- Verify: user triggers disabled, internal triggers still enabled
-SELECT tgname, tgenabled, tgisinternal
+SELECT
+	CASE
+		WHEN tgname ~ '^RI_ConstraintTrigger_c_[0-9]+$'
+		THEN 'RI_ConstraintTrigger'
+		ELSE tgname
+	END AS tgname,
+	tgenabled,
+	tgisinternal
 FROM pg_trigger
 WHERE tgrelid = 'test_trigger_table'::regclass
 ORDER BY tgisinternal, tgname;
@@ -345,7 +359,14 @@ INSERT INTO test_trigger_table (i, val) VALUES (99, 'invalid');  -- Should fail 
 ALTER TABLE test_trigger_table ENABLE TRIGGER USER;
 
 -- Verify: user triggers enabled back to origin mode
-SELECT tgname, tgenabled, tgisinternal
+SELECT
+	CASE
+		WHEN tgname ~ '^RI_ConstraintTrigger_c_[0-9]+$'
+		THEN 'RI_ConstraintTrigger'
+		ELSE tgname
+	END AS tgname,
+	tgenabled,
+	tgisinternal
 FROM pg_trigger
 WHERE tgrelid = 'test_trigger_table'::regclass
 ORDER BY tgisinternal, tgname;
@@ -360,7 +381,14 @@ ORDER BY log_id;
 -- Test combination: DISABLE ALL then ENABLE USER
 ALTER TABLE test_trigger_table DISABLE TRIGGER ALL;
 
-SELECT tgname, tgenabled, tgisinternal
+SELECT
+	CASE
+		WHEN tgname ~ '^RI_ConstraintTrigger_c_[0-9]+$'
+		THEN 'RI_ConstraintTrigger'
+		ELSE tgname
+	END AS tgname,
+	tgenabled,
+	tgisinternal
 FROM pg_trigger
 WHERE tgrelid = 'test_trigger_table'::regclass
 ORDER BY tgisinternal, tgname;
@@ -368,7 +396,14 @@ ORDER BY tgisinternal, tgname;
 ALTER TABLE test_trigger_table ENABLE TRIGGER USER;
 
 -- User triggers should be enabled, internal triggers still disabled
-SELECT tgname, tgenabled, tgisinternal
+SELECT
+	CASE
+		WHEN tgname ~ '^RI_ConstraintTrigger_c_[0-9]+$'
+		THEN 'RI_ConstraintTrigger'
+		ELSE tgname
+	END AS tgname,
+	tgenabled,
+	tgisinternal
 FROM pg_trigger
 WHERE tgrelid = 'test_trigger_table'::regclass
 ORDER BY tgisinternal, tgname;

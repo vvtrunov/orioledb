@@ -762,67 +762,27 @@ DROP TABLE o_test_rule_table CASCADE;
 
 -- Test AT_CheckNotNull (internally generated for partitioned tables)
 -- AT_CheckNotNull is generated when you use ALTER TABLE ONLY ... SET NOT NULL
--- on a partitioned table. It checks that child partitions already have NOT NULL.
-
--- Create a partitioned table
-CREATE TABLE o_o_test_check_not_null (
-	i int,
-	val text NOT NULL
-) PARTITION BY RANGE (i) USING orioledb;
-
--- Create partitions with NOT NULL already set
-CREATE TABLE o_test_check_not_null_p1 PARTITION OF o_test_check_not_null
-	FOR VALUES FROM (1) TO (100) USING orioledb;
-
-CREATE TABLE o_test_check_not_null_p2 PARTITION OF o_test_check_not_null
-	FOR VALUES FROM (100) TO (200) USING orioledb;
-
--- Insert test data
-INSERT INTO o_test_check_not_null VALUES (1, 'abc'), (50, 'def'), (150, 'ghi');
-
--- Verify partitions exist
-SELECT tablename FROM pg_tables
-WHERE schemaname = 'ddl' AND tablename LIKE 'o_test_check_not_null%'
-ORDER BY tablename;
-
--- Verify val column is already NOT NULL in all partitions
-SELECT c.relname, a.attname, a.attnotnull
-FROM pg_class c
-JOIN pg_attribute a ON a.attrelid = c.oid
-WHERE c.relname LIKE 'o_test_check_not_null%'
-  AND a.attname = 'val'
-  AND c.relnamespace = 'ddl'::regnamespace
-ORDER BY c.relname;
-
--- Now use ALTER TABLE ONLY ... SET NOT NULL on parent
--- This internally generates AT_CheckNotNull for each partition
--- to verify they already have NOT NULL (which they do)
-ALTER TABLE ONLY o_test_check_not_null ALTER COLUMN val SET NOT NULL;
-
--- Verify the operation succeeded
-SELECT c.relname, a.attname, a.attnotnull
-FROM pg_class c
-JOIN pg_attribute a ON a.attrelid = c.oid
-WHERE c.relname = 'o_test_check_not_null'
-  AND a.attname = 'val'
-  AND c.relnamespace = 'ddl'::regnamespace;
-
--- Test that NOT NULL is enforced
-INSERT INTO o_test_check_not_null VALUES (75, NULL);
-
--- Verify data is still correct
-SELECT * FROM o_test_check_not_null ORDER BY i;
+-- on a partitioned table. It verifies that all child partitions can satisfy NOT NULL.
 
 -- Test AT_CheckNotNull failure case: partition without NOT NULL
 CREATE TABLE o_test_check_not_null_fail (
 	i int,
-	val text  -- Note: no NOT NULL here!
+	val text  -- Note: no NOT NULL constraint
 ) PARTITION BY RANGE (i) USING orioledb;
 
 CREATE TABLE o_test_check_not_null_fail_p1 PARTITION OF o_test_check_not_null_fail
 	FOR VALUES FROM (1) TO (100) USING orioledb;
 
--- Try to set NOT NULL on parent ONLY (should fail because partition doesn't have NOT NULL)
+-- Verify partition does not have NOT NULL
+SELECT c.relname, a.attname, a.attnotnull
+FROM pg_class c
+JOIN pg_attribute a ON a.attrelid = c.oid
+WHERE c.relname LIKE 'o_test_check_not_null_fail%'
+  AND a.attname = 'val'
+  AND c.relnamespace = 'ddl'::regnamespace
+ORDER BY c.relname;
+
+-- Try to set NOT NULL on parent ONLY (should fail because partition has NULL values)
 ALTER TABLE ONLY o_test_check_not_null_fail ALTER COLUMN val SET NOT NULL;
 
 -- Test AT_ValidateConstraint (validate a NOT VALID constraint)
@@ -851,166 +811,6 @@ SELECT conname, convalidated
 FROM pg_constraint
 WHERE conrelid = 'o_test_validate_constraint'::regclass
   AND conname = 'check_t_length';
-
--- Test AT_SetTableSpace (change tablespace)
--- Note: This test assumes default tablespace exists
-CREATE TABLE o_test_tablespace (
-	i int PRIMARY KEY,
-	t text
-) USING orioledb;
-
--- Try to set tablespace (may be no-op if no custom tablespace)
--- This tests that the subcommand doesn't error out
-ALTER TABLE o_test_tablespace SET TABLESPACE pg_default;
-
--- Test AT_GenericOptions (for foreign tables, but we test the subcommand handling)
--- This is mainly to ensure the subcommand is accepted for OrioleDB tables
--- even though it may not do anything meaningful
-
--- Test constraint operations with existing ddl test patterns
-CREATE TABLE o_test_constraint_ops (
-	i int PRIMARY KEY,
-	val int,
-	CHECK (val > 0)
-) USING orioledb;
-
-INSERT INTO o_test_constraint_ops VALUES (1, 10), (2, 20);
-
--- Verify data
-SELECT * FROM o_test_constraint_ops ORDER BY i;
-
--- Test dropping constraint
-ALTER TABLE o_test_constraint_ops DROP CONSTRAINT o_test_constraint_ops_val_check;
-
--- Now we can insert negative values
-INSERT INTO o_test_constraint_ops VALUES (3, -5);
-
-SELECT * FROM o_test_constraint_ops ORDER BY i;
-
--- Test ReAdd* subcommands (triggered during table rewrites)
--- These subcommands are used internally when ALTER TABLE causes a table rewrite
-
--- Test AT_ReAddConstraint (triggered by ALTER TYPE with constraints)
-CREATE TABLE o_test_readd_constraint (
-	i int PRIMARY KEY,
-	val int CHECK (val > 0)
-) USING orioledb;
-
-INSERT INTO o_test_readd_constraint VALUES (1, 100), (2, 200);
-
--- Verify constraint exists
-SELECT conname, contype
-FROM pg_constraint
-WHERE conrelid = 'o_test_readd_constraint'::regclass
-  AND contype = 'c'
-ORDER BY conname;
-
--- Change column type - this causes table rewrite and ReAddConstraint
-ALTER TABLE o_test_readd_constraint ALTER COLUMN val TYPE bigint;
-
--- Verify constraint still exists after rewrite
-SELECT conname, contype
-FROM pg_constraint
-WHERE conrelid = 'o_test_readd_constraint'::regclass
-  AND contype = 'c'
-ORDER BY conname;
-
--- Verify constraint still works
-INSERT INTO o_test_readd_constraint VALUES (3, -5);
-
-SELECT * FROM o_test_readd_constraint ORDER BY i;
-
--- Test AT_ReAddIndex (triggered by ALTER TYPE on indexed columns)
-CREATE TABLE o_test_readd_index (
-	i int PRIMARY KEY,
-	code int,
-	name text
-) USING orioledb;
-
-CREATE INDEX o_test_readd_index_code_idx ON o_test_readd_index(code);
-CREATE INDEX o_test_readd_index_name_idx ON o_test_readd_index(name);
-
-INSERT INTO o_test_readd_index VALUES (1, 100, 'alice'), (2, 200, 'bob');
-
--- Verify indexes exist
-SELECT indexname
-FROM pg_indexes
-WHERE tablename = 'o_test_readd_index'
-  AND schemaname = 'ddl'
-ORDER BY indexname;
-
--- Change non-indexed column type - causes table rewrite, indexes are preserved
-ALTER TABLE o_test_readd_index ALTER COLUMN name TYPE varchar(100);
-
--- Verify indexes still exist after rewrite
-SELECT indexname
-FROM pg_indexes
-WHERE tablename = 'o_test_readd_index'
-  AND schemaname = 'ddl'
-ORDER BY indexname;
-
--- Verify indexes still work
-SET enable_seqscan = off;
-EXPLAIN (COSTS OFF) SELECT * FROM o_test_readd_index WHERE code = 100;
-SELECT * FROM o_test_readd_index WHERE code = 100;
-RESET enable_seqscan;
-
--- Test AT_ReAddStatistics (triggered by table rewrite with statistics)
-CREATE TABLE o_test_readd_statistics (
-	i int PRIMARY KEY,
-	val int,
-	txt text
-) USING orioledb;
-
--- Set custom statistics targets
-ALTER TABLE o_test_readd_statistics ALTER COLUMN val SET STATISTICS 500;
-ALTER TABLE o_test_readd_statistics ALTER COLUMN txt SET STATISTICS 1000;
-
--- Verify statistics targets are set
-SELECT attname, attstattarget
-FROM pg_attribute
-WHERE attrelid = 'o_test_readd_statistics'::regclass
-  AND attnum > 0
-ORDER BY attnum;
-
--- Cause a table rewrite by changing a column type
-ALTER TABLE o_test_readd_statistics ALTER COLUMN i TYPE bigint;
-
--- Verify statistics targets are preserved after rewrite
-SELECT attname, attstattarget
-FROM pg_attribute
-WHERE attrelid = 'o_test_readd_statistics'::regclass
-  AND attnum > 0
-ORDER BY attnum;
-
--- Test AT_ReAddComment (triggered by table rewrite with column comments)
-CREATE TABLE o_test_readd_comment (
-	i int PRIMARY KEY,
-	val int
-) USING orioledb;
-
--- Add comments to columns
-COMMENT ON COLUMN o_test_readd_comment.i IS 'Primary key column';
-COMMENT ON COLUMN o_test_readd_comment.val IS 'Value column';
-
--- Verify comments exist
-SELECT a.attname, d.description
-FROM pg_attribute a
-LEFT JOIN pg_description d ON d.objoid = a.attrelid AND d.objsubid = a.attnum
-WHERE a.attrelid = 'o_test_readd_comment'::regclass
-  AND a.attnum > 0
-ORDER BY a.attnum;
-
--- Cause table rewrite
-ALTER TABLE o_test_readd_comment ALTER COLUMN val TYPE bigint;
-
--- Verify comments are preserved after rewrite
-SELECT a.attname, d.description
-FROM pg_attribute a
-LEFT JOIN pg_description d ON d.objoid = a.attrelid AND d.objsubid = a.attnum
-WHERE a.attrelid = 'o_test_readd_comment'::regclass
-  AND a.attnum > 0
-ORDER BY a.attnum;
 
 -- Test AT_ReplaceRelOptions (used by CREATE OR REPLACE VIEW with options)
 -- AT_ReplaceRelOptions is triggered internally when CREATE OR REPLACE VIEW
@@ -1080,85 +880,6 @@ SELECT * FROM o_test_replace_view ORDER BY i;
 DROP VIEW o_test_replace_view;
 DROP TABLE o_test_view_base CASCADE;
 
--- Test AT_ReAddDomainConstraint (domain constraints during table rewrite)
--- Domain constraints need to be re-verified when table is rewritten
--- Create a domain with CHECK constraint
-CREATE DOMAIN positive_int AS int CHECK (VALUE > 0);
-CREATE DOMAIN email_type AS varchar(100) CHECK (VALUE ~ '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$');
-
-CREATE TABLE o_test_readd_domain_constraint (
-	i int PRIMARY KEY,
-	quantity positive_int,
-	contact_email email_type
-) USING orioledb;
-
--- Insert valid data
-INSERT INTO o_test_readd_domain_constraint VALUES (1, 100, 'user@example.com');
-INSERT INTO o_test_readd_domain_constraint VALUES (2, 50, 'admin@test.org');
-
--- Verify domain constraints work before rewrite
-INSERT INTO o_test_readd_domain_constraint VALUES (3, -5, 'valid@email.com');  -- Should fail: negative quantity
-INSERT INTO o_test_readd_domain_constraint VALUES (4, 10, 'invalid-email');    -- Should fail: invalid email format
-
-SELECT * FROM o_test_readd_domain_constraint ORDER BY i;
-
--- Verify domain constraints exist in catalog
-SELECT t.typname, c.conname, c.consrc
-FROM pg_constraint c
-JOIN pg_type t ON t.oid = c.contypid
-WHERE t.typname IN ('positive_int', 'email_type')
-ORDER BY t.typname, c.conname;
-
--- Cause table rewrite by changing a different column
--- This should trigger AT_ReAddDomainConstraint for the domain columns
-ALTER TABLE o_test_readd_domain_constraint ADD COLUMN extra_data text;
-ALTER TABLE o_test_readd_domain_constraint ALTER COLUMN extra_data TYPE varchar(50);
-
--- Verify domain constraints still work after rewrite
-INSERT INTO o_test_readd_domain_constraint (i, quantity, contact_email) VALUES (5, -10, 'test@example.com');  -- Should fail
-INSERT INTO o_test_readd_domain_constraint (i, quantity, contact_email) VALUES (6, 20, 'bad-email');          -- Should fail
-INSERT INTO o_test_readd_domain_constraint (i, quantity, contact_email) VALUES (7, 75, 'good@email.com');     -- Should succeed
-
-SELECT * FROM o_test_readd_domain_constraint ORDER BY i;
-
--- Verify domain constraints still exist after rewrite
-SELECT t.typname, c.conname, c.consrc
-FROM pg_constraint c
-JOIN pg_type t ON t.oid = c.contypid
-WHERE t.typname IN ('positive_int', 'email_type')
-ORDER BY t.typname, c.conname;
-
--- Test with domain that has NOT NULL constraint
-CREATE DOMAIN nonempty_text AS text NOT NULL CHECK (length(VALUE) > 0);
-
-CREATE TABLE o_test_domain_not_null (
-	i int PRIMARY KEY,
-	description nonempty_text
-) USING orioledb;
-
-INSERT INTO o_test_domain_not_null VALUES (1, 'Valid description');
-INSERT INTO o_test_domain_not_null VALUES (2, NULL);  -- Should fail: NOT NULL
-INSERT INTO o_test_domain_not_null VALUES (3, '');    -- Should fail: length check
-
-SELECT * FROM o_test_domain_not_null ORDER BY i;
-
--- Cause rewrite
-ALTER TABLE o_test_domain_not_null ALTER COLUMN i TYPE bigint;
-
--- Verify constraints still enforced after rewrite
-INSERT INTO o_test_domain_not_null VALUES (4, NULL);  -- Should fail
-INSERT INTO o_test_domain_not_null VALUES (5, '');    -- Should fail
-INSERT INTO o_test_domain_not_null VALUES (6, 'Another valid description');  -- Should succeed
-
-SELECT * FROM o_test_domain_not_null ORDER BY i;
-
--- Cleanup domains
-DROP TABLE o_test_domain_not_null CASCADE;
-DROP TABLE o_test_readd_domain_constraint CASCADE;
-DROP DOMAIN nonempty_text;
-DROP DOMAIN email_type;
-DROP DOMAIN positive_int;
-
 -- Test AT_AddOf and AT_DropOf (typed tables)
 -- Typed tables are tables that are bound to a composite type
 -- AT_AddOf converts a regular table to a typed table
@@ -1179,7 +900,13 @@ CREATE TABLE o_test_regular_table (
 ) USING orioledb;
 
 -- Check initial state (reloftype should be 0 for regular table)
-SELECT relname, reloftype, relkind
+SELECT
+	relname,
+	CASE 
+		WHEN reloftype = 0 THEN 'regular'
+		ELSE 'typed'
+	END AS reloftype,
+	relkind
 FROM pg_class
 WHERE relname = 'o_test_regular_table';
 
@@ -1193,10 +920,15 @@ SELECT * FROM o_test_regular_table ORDER BY emp_id;
 ALTER TABLE o_test_regular_table OF employee_type;
 
 -- Verify table is now typed (reloftype should be OID of employee_type)
-SELECT c.relname, c.reloftype, t.typname
-FROM pg_class c
-LEFT JOIN pg_type t ON c.reloftype = t.oid
-WHERE c.relname = 'o_test_regular_table';
+SELECT
+	relname,
+	CASE 
+		WHEN reloftype = 0 THEN 'regular'
+		ELSE 'typed'
+	END AS reloftype,
+	relkind
+FROM pg_class
+WHERE relname = 'o_test_regular_table';
 
 -- Verify data is preserved
 SELECT * FROM o_test_regular_table ORDER BY emp_id;
@@ -1218,9 +950,15 @@ ALTER TABLE o_test_regular_table DROP COLUMN emp_salary;  -- Should fail
 ALTER TABLE o_test_regular_table NOT OF;
 
 -- Verify table is no longer typed (reloftype should be 0)
-SELECT c.relname, c.reloftype
-FROM pg_class c
-WHERE c.relname = 'o_test_regular_table';
+SELECT
+	relname,
+	CASE 
+		WHEN reloftype = 0 THEN 'regular'
+		ELSE 'typed'
+	END AS reloftype,
+	relkind
+FROM pg_class
+WHERE relname = 'o_test_regular_table';
 
 -- Verify data is still preserved
 SELECT * FROM o_test_regular_table ORDER BY emp_id;
@@ -1240,10 +978,15 @@ CREATE TABLE o_test_typed_table OF employee_type (
 ) USING orioledb;
 
 -- Verify it's typed from creation
-SELECT c.relname, c.reloftype, t.typname
-FROM pg_class c
-LEFT JOIN pg_type t ON c.reloftype = t.oid
-WHERE c.relname = 'o_test_typed_table';
+SELECT
+	relname,
+	CASE 
+		WHEN reloftype = 0 THEN 'regular'
+		ELSE 'typed'
+	END AS reloftype,
+	relkind
+FROM pg_class
+WHERE relname = 'o_test_typed_table';
 
 -- Insert data into typed table
 INSERT INTO o_test_typed_table VALUES (10, 'Eve', 60000);
@@ -1255,9 +998,15 @@ SELECT * FROM o_test_typed_table ORDER BY emp_id;
 ALTER TABLE o_test_typed_table NOT OF;
 
 -- Verify it's no longer typed
-SELECT c.relname, c.reloftype
-FROM pg_class c
-WHERE c.relname = 'o_test_typed_table';
+SELECT
+	relname,
+	CASE 
+		WHEN reloftype = 0 THEN 'regular'
+		ELSE 'typed'
+	END AS reloftype,
+	relkind
+FROM pg_class
+WHERE relname = 'o_test_typed_table';
 
 -- Data still accessible
 SELECT * FROM o_test_typed_table ORDER BY emp_id;

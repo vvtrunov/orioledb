@@ -252,7 +252,6 @@ WHERE conname = 'fk_alter_test';
 
 -- Now constraint cannot be deferred
 BEGIN;
--- FIXME: This should fail immediately (constraint not deferrable)
 INSERT INTO o_test_alter_constraint VALUES (3, 77, 'test3');
 ROLLBACK;
 

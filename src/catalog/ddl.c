@@ -973,7 +973,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_AddOf:
 						case AT_AlterColumnGenericOptions:
 						case AT_AlterConstraint:
-						case AT_CheckNotNull:
 						case AT_DisableTrig:
 						case AT_DisableTrigAll:
 						case AT_DisableTrigUser:
@@ -985,11 +984,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_EnableTrigUser:
 						case AT_ForceRowSecurity:
 						case AT_NoForceRowSecurity:
-						case AT_ReAddComment:
-						case AT_ReAddConstraint:
-						case AT_ReAddDomainConstraint:
-						case AT_ReAddIndex:
-						case AT_ReAddStatistics:
 						case AT_ReplaceRelOptions:
 						case AT_ResetOptions:
 						case AT_SetLogged:

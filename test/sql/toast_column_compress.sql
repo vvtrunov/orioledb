@@ -66,6 +66,7 @@ WHERE attrelid = 'o_test_set_compression'::regclass
 ORDER BY attname;
 
 -- Set compression method for data1 column
+-- FIXME: Currently unsupported in orioledb, so this command will fail. Orioledb always uses pglz.
 ALTER TABLE o_test_set_compression ALTER COLUMN data1 SET COMPRESSION pglz;
 
 SELECT attname, attcompression
