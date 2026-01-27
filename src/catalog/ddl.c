@@ -1008,7 +1008,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									(errcode(ERRCODE_SYNTAX_ERROR),
 									 errmsg("changing access method is not supported for OrioleDB tables")));
 							break;
+#if PG_VERSION_NUM >= 170000
 						case AT_SetExpression:
+#endif
 						case AT_SetCompression:
 						default:
 							ereport(ERROR,
