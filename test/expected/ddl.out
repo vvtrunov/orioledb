@@ -1537,20 +1537,20 @@ WHERE attrelid = 'o_test_set_statistics'::regclass
 ORDER BY attnum;
  attname | attstattarget 
 ---------+---------------
- i       |              
+ i       |            -1
  t       |           100
  v       |          1000
 (3 rows)
 
 -- Reset statistics to default
-ALTER TABLE o_test_set_statistics ALTER COLUMN t SET STATISTICS DEFAULT;
+ALTER TABLE o_test_set_statistics ALTER COLUMN t SET STATISTICS -1;
 SELECT attname, attstattarget
 FROM pg_attribute
 WHERE attrelid = 'o_test_set_statistics'::regclass
   AND attname = 't';
  attname | attstattarget 
 ---------+---------------
- t       |              
+ t       |            -1
 (1 row)
 
 -- Test AT_SetLogged / AT_SetUnLogged
@@ -1797,7 +1797,7 @@ DROP TABLE o_test_rule_table CASCADE;
 CREATE TABLE o_test_check_not_null_fail (
 	i int,
 	val text  -- Note: no NOT NULL constraint
-) PARTITION BY RANGE (i) USING orioledb;
+) PARTITION BY RANGE (i);
 CREATE TABLE o_test_check_not_null_fail_p1 PARTITION OF o_test_check_not_null_fail
 	FOR VALUES FROM (1) TO (100) USING orioledb;
 -- Verify partition does not have NOT NULL
@@ -2242,13 +2242,14 @@ drop cascades to table o_test_logged_changes
 drop cascades to table o_test_column_options
 drop cascades to table o_test_table_options
 drop cascades to table o_test_cluster
-drop cascades to table o_test_check_not_null_fail
+drop cascades to table o_test_check_not_null_fail_p1
 drop cascades to table o_test_validate_constraint
 DROP SCHEMA ddl CASCADE;
-NOTICE:  drop cascades to 5 other objects
+NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)
 drop cascades to sequence o_test_add_column_id_seq2
 drop cascades to sequence o_test_j_seq
 drop cascades to function query_to_text(text)
 drop cascades to function o_test_plpgsql_default_func(integer)
+drop cascades to table o_test_check_not_null_fail
 RESET search_path;

@@ -574,7 +574,7 @@ WHERE attrelid = 'o_test_set_statistics'::regclass
 ORDER BY attnum;
 
 -- Reset statistics to default
-ALTER TABLE o_test_set_statistics ALTER COLUMN t SET STATISTICS DEFAULT;
+ALTER TABLE o_test_set_statistics ALTER COLUMN t SET STATISTICS -1;
 
 SELECT attname, attstattarget
 FROM pg_attribute
@@ -768,7 +768,7 @@ DROP TABLE o_test_rule_table CASCADE;
 CREATE TABLE o_test_check_not_null_fail (
 	i int,
 	val text  -- Note: no NOT NULL constraint
-) PARTITION BY RANGE (i) USING orioledb;
+) PARTITION BY RANGE (i);
 
 CREATE TABLE o_test_check_not_null_fail_p1 PARTITION OF o_test_check_not_null_fail
 	FOR VALUES FROM (1) TO (100) USING orioledb;
