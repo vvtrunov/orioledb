@@ -567,7 +567,12 @@ ALTER TABLE o_test_set_statistics ALTER COLUMN t SET STATISTICS 100;
 ALTER TABLE o_test_set_statistics ALTER COLUMN v SET STATISTICS 1000;
 
 -- Verify the changes
-SELECT attname, attstattarget
+SELECT
+	attname,
+	CASE
+		WHEN attstattarget is NULL THEN -1 -- as PG17 changes behaviour for default stats target
+		ELSE attstattarget
+	END AS attstattarget
 FROM pg_attribute
 WHERE attrelid = 'o_test_set_statistics'::regclass
   AND attnum > 0
@@ -576,7 +581,12 @@ ORDER BY attnum;
 -- Reset statistics to default
 ALTER TABLE o_test_set_statistics ALTER COLUMN t SET STATISTICS -1;
 
-SELECT attname, attstattarget
+SELECT 
+	attname,
+	CASE
+		WHEN attstattarget is NULL THEN -1 -- as PG17 changes behaviour for default stats target
+		ELSE attstattarget
+	END AS attstattarget
 FROM pg_attribute
 WHERE attrelid = 'o_test_set_statistics'::regclass
   AND attname = 't';
