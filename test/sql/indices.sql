@@ -2020,6 +2020,27 @@ INSERT INTO o_test_add_index_constraint VALUES (4, 'four');  -- Should succeed
 -- FIXME: Now it does not fail as expected
 INSERT INTO o_test_add_index_constraint VALUES (1, 'duplicate');  -- Should fail (PK violation)
 
+-- Create a unique index on val column
+CREATE UNIQUE INDEX o_test_idx_val ON o_test_add_index_constraint(val);
+
+-- Check state before adding UNIQUE constraint
+SELECT conname, contype, conindid::regclass
+FROM pg_constraint
+WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+
+-- Test AT_AddIndexConstraint: Add UNIQUE constraint using existing index
+ALTER TABLE o_test_add_index_constraint
+	ADD CONSTRAINT o_test_uq UNIQUE USING INDEX o_test_idx_val;
+
+-- Verify both constraints exist
+SELECT conname, contype, conindid::regclass
+FROM pg_constraint
+WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+
+-- Test UNIQUE constraint enforcement
+INSERT INTO o_test_add_index_constraint VALUES (5, 'five');  -- Should succeed
+INSERT INTO o_test_add_index_constraint VALUES (6, 'one');  -- Should fail (UNIQUE violation)
+
 -- Cleanup
 DROP TABLE o_test_add_index_constraint CASCADE;
 

@@ -8705,6 +8705,36 @@ WHERE conrelid = 'o_test_add_index_constraint'::regclass;
 INSERT INTO o_test_add_index_constraint VALUES (4, 'four');  -- Should succeed
 -- FIXME: Now it does not fail as expected
 INSERT INTO o_test_add_index_constraint VALUES (1, 'duplicate');  -- Should fail (PK violation)
+-- Create a unique index on val column
+CREATE UNIQUE INDEX o_test_idx_val ON o_test_add_index_constraint(val);
+-- Check state before adding UNIQUE constraint
+SELECT conname, contype, conindid::regclass
+FROM pg_constraint
+WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+  conname  | contype | conindid  
+-----------+---------+-----------
+ o_test_pk | p       | o_test_pk
+(1 row)
+
+-- Test AT_AddIndexConstraint: Add UNIQUE constraint using existing index
+ALTER TABLE o_test_add_index_constraint
+	ADD CONSTRAINT o_test_uq UNIQUE USING INDEX o_test_idx_val;
+NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "o_test_idx_val" to "o_test_uq"
+-- Verify both constraints exist
+SELECT conname, contype, conindid::regclass
+FROM pg_constraint
+WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+  conname  | contype | conindid  
+-----------+---------+-----------
+ o_test_pk | p       | o_test_pk
+ o_test_uq | u       | o_test_uq
+(2 rows)
+
+-- Test UNIQUE constraint enforcement
+INSERT INTO o_test_add_index_constraint VALUES (5, 'five');  -- Should succeed
+INSERT INTO o_test_add_index_constraint VALUES (6, 'one');  -- Should fail (UNIQUE violation)
+ERROR:  duplicate key value violates unique constraint "o_test_idx_val"
+DETAIL:  Key (val)=('one') already exists.
 -- Cleanup
 DROP TABLE o_test_add_index_constraint CASCADE;
 SELECT orioledb_parallel_debug_stop();
